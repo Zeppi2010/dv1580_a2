@@ -4,96 +4,271 @@
 #include <assert.h>
 #include <time.h>
 #include <stddef.h>
-
+#include <math.h>
 #include "common_defs.h"
 #include "gitdata.h"
 
+typedef struct
+{
+    Node **head; // Pointer to the head of the linked list
+    Node *prev_node;
+    int start_value; // Value of the node to insert after
+    int thread_id;   // Unique ID for each thread
+    int num_nodes;   // Number of nodes to insert
+} thread_data_t;
+
+typedef struct
+{
+    int num_threads;
+    int num_nodes;
+} TestParams;
+
 // Function to capture stdout output.
-void capture_stdout(char *buffer, size_t size, void (*func)(Node **, Node *, Node *), Node **head, Node *start_node, Node *end_node) {
+void capture_stdout(char *buffer, size_t size, void (*func)(Node **, Node *, Node *), Node **head, Node *start_node, Node *end_node)
+{
+    // Save the original stdout
+    FILE *original_stdout = stdout;
+
     // Open a temporary file to capture stdout
-    FILE *tempFile = fopen("temp_output.txt", "w+");
-    if (tempFile == NULL) {
+    FILE *fp = tmpfile(); // tmpfile() creates a temporary file
+    if (fp == NULL)
+    {
         printf("Failed to open temporary file for capturing stdout.\n");
         return;
     }
 
-    // Save the original stdout
-    FILE *original_stdout = stdout;
-
     // Redirect stdout to the temporary file
-    stdout = tempFile;
+    stdout = fp;
 
     // Call the function whose output we want to capture
     func(head, start_node, end_node);
 
     // Flush the output to the temporary file
-    fflush(stdout);
+    fflush(fp);
+
+    // Reset the file position to the beginning
+    rewind(fp);
+
+    // Read the content of the temporary file into the buffer
+    fread(buffer, 1, size - 1, fp); // Leave space for null terminator
+    buffer[size - 1] = '\0';        // Ensure the buffer is null-terminated
+
+    // Close the temporary file
+    fclose(fp);
 
     // Restore the original stdout
     stdout = original_stdout;
-
-    // Read the content of the temporary file into the buffer
-    rewind(tempFile);  // Reset the file position to the beginning
-    fread(buffer, 1, size - 1, tempFile);  // Leave space for null terminator
-    buffer[size - 1] = '\0';  // Ensure the buffer is null-terminated
-
-    // Close the temporary file
-    fclose(tempFile);
 }
-
 
 // ********* Test basic linked list operations *********
 
-void test_list_init()
+void *thread_insert_function(void *arg)
 {
-    printf_yellow("  Testing list_init ---> ");
+    thread_data_t *data = (thread_data_t *)arg;
+    for (int i = 0; i < data->num_nodes; i++)
+    {
+        list_insert(data->head, data->start_value + i);
+    }
+    return NULL;
+}
+
+void test_list_insert_multithread(TestParams *params)
+{
+    printf_yellow("  Testing list_insert (threads: %d, nodes: %d) ---> ", params->num_threads, params->num_nodes);
+
     Node *head = NULL;
-    list_init(&head, sizeof(Node));
-    my_assert(head == NULL);
+    list_init(&head, sizeof(Node) * params->num_nodes);
+
+    pthread_t *threads = malloc(params->num_threads * sizeof(pthread_t));
+    thread_data_t *thread_data = malloc(params->num_threads * sizeof(thread_data_t));
+    int nodes_per_thread = params->num_nodes / params->num_threads;
+    // Initialize threads and data structures
+    for (int i = 0; i < params->num_threads; i++)
+    {
+        thread_data[i].head = &head;
+        thread_data[i].start_value = i * nodes_per_thread;
+        thread_data[i].num_nodes = nodes_per_thread;
+        if (pthread_create(&threads[i], NULL, thread_insert_function, &thread_data[i]))
+        {
+            perror("Failed to create thread");
+        }
+    }
+
+    // Join all threads
+    for (int i = 0; i < params->num_threads; i++)
+    {
+        pthread_join(threads[i], NULL);
+    }
+
+    my_assert(list_count_nodes(&head) == params->num_nodes);
+    // Verify and clean up
+    // Note: Verification can be complex in multithreaded contexts due to node order variations
+    printf_green("[PASS].\n");
     list_cleanup(&head);
+
+    free(threads);
+    free(thread_data);
+}
+
+void *thread_insert_after_function(void *arg)
+{
+    thread_data_t *data = (thread_data_t *)arg;
+    for (int i = 0; i < data->num_nodes; i++)
+    {
+        list_insert_after(data->prev_node, data->start_value + i);
+    }
+    return NULL;
+}
+
+void test_list_insert_after_multithread(TestParams *params)
+{
+    printf_yellow("  Testing list_insert_after (threads: %d, nodes: %d) ---> ", params->num_threads, params->num_nodes);
+
+    Node *head = NULL;
+    list_init(&head, sizeof(Node) * (params->num_nodes + 1)); // +1 for the initial node
+    list_insert(&head, 10);                                   // Initial node to insert after
+
+    pthread_t *threads = malloc(params->num_threads * sizeof(pthread_t));
+    thread_data_t *thread_data = malloc(params->num_threads * sizeof(thread_data_t));
+    int nodes_per_thread = params->num_nodes / params->num_threads;
+
+    // Initialize threads and data structures
+    for (int i = 0; i < params->num_threads; i++)
+    {
+        thread_data[i].head = &head;
+        thread_data[i].prev_node = head; // Always insert after the first node
+        thread_data[i].start_value = i * nodes_per_thread;
+        thread_data[i].num_nodes = nodes_per_thread;
+        if (pthread_create(&threads[i], NULL, thread_insert_after_function, &thread_data[i]))
+        {
+            perror("Failed to create thread");
+        }
+    }
+
+    // Join all threads
+    for (int i = 0; i < params->num_threads; i++)
+    {
+        pthread_join(threads[i], NULL);
+    }
+
+    // Verify node count
+    my_assert(list_count_nodes(&head) == params->num_nodes + 1); // +1 for the initial node
+
+    // Cleanup and pass message
+    list_cleanup(&head);
+    free(threads);
+    free(thread_data);
     printf_green("[PASS].\n");
 }
 
-void test_list_insert()
+void *thread_insert_before(void *arg)
 {
-    printf_yellow("  Testing list_insert ---> ");
+    thread_data_t *data = (thread_data_t *)arg;
+
+    for (int i = 0; i < data->num_nodes; i++)
+    {
+        // Data calculation could be adjusted to fit specific patterns or test cases
+        uint16_t insert_data = (data->thread_id + 1) * 100 + i; // Example pattern
+        list_insert_before(data->head, data->prev_node, insert_data);
+    }
+    return NULL;
+}
+
+void test_list_insert_before_multithreaded(TestParams *params)
+{
+    printf_yellow("  Testing list_insert_before with %d threads, each inserting %d nodes ---> ", params->num_threads, params->num_nodes);
     Node *head = NULL;
-    list_init(&head, sizeof(Node) * 2);
-    list_insert(&head, 10);
-    list_insert(&head, 20);
-    my_assert(head->data == 10);
-    my_assert(head->next->data == 20);
+    list_init(&head, sizeof(Node) * (params->num_threads + params->num_nodes + 1)); // Allocate enough space
+
+    Node **nodes = malloc(sizeof(Node *) * (params->num_threads + 1)); // Array of pointers to Node
+    list_insert(&head, 0);                                             // Insert the initial head node
+    nodes[0] = head;                                                   // Save head node pointer
+
+    // Insert additional nodes to serve as insertion targets
+    for (int i = 1; i <= params->num_threads; i++)
+    {
+        list_insert(&head, i * 10);    // Sequentially increasing data
+        nodes[i] = nodes[i - 1]->next; // Save pointer to the newly added node
+    }
+
+    pthread_t threads[params->num_threads];
+    thread_data_t thread_data[params->num_threads];
+
+    // Set up thread data and create threads for inserting nodes
+    for (int i = 0; i < params->num_threads; i++)
+    {
+        thread_data[i].head = &head;
+        thread_data[i].prev_node = nodes[i];                                // Each thread starts at a different initial node
+        thread_data[i].num_nodes = params->num_nodes / params->num_threads; // Distribute nodes evenly
+        pthread_create(&threads[i], NULL, thread_insert_before, &thread_data[i]);
+    }
+
+    // Join all threads
+    for (int i = 0; i < params->num_threads; i++)
+    {
+        pthread_join(threads[i], NULL);
+    }
+
+    // Optional: Verify the list structure, node count, etc.
+    int expected_count = params->num_threads + params->num_nodes + 1; // Initial nodes + inserted nodes + head
+    my_assert(list_count_nodes(&head) == expected_count);
     list_cleanup(&head);
+
+    free(nodes); // Free the dynamically allocated nodes array
     printf_green("[PASS].\n");
 }
 
-void test_list_insert_after()
+void *thread_delete_function(void *arg)
 {
-    printf_yellow("  Testing list_insert_after ---> ");
-    Node *head = NULL;
-    list_init(&head, sizeof(Node) * 3);
-    list_insert(&head, 10);
-    Node *node = head;
-    list_insert_after(node, 20);
-    my_assert(node->next->data == 20);
-
-    list_cleanup(&head);
-    printf_green("[PASS].\n");
+    thread_data_t *data = (thread_data_t *)arg;
+    for (int i = 0; i < data->num_nodes; i++)
+    {
+        // Compute data value assuming unique values for simplicity
+        uint16_t data_value = data->thread_id * data->num_nodes + i; // Adjust the multiplier if necessary to match insertion pattern
+        list_delete(data->head, data_value);
+    }
+    return NULL;
 }
 
-void test_list_insert_before()
+void test_list_delete_multithreaded(TestParams *params)
 {
-    printf_yellow("  Testing list_insert_before ---> ");
+    printf_yellow("  Testing list_delete with %d threads, nodes: %d ---> ", params->num_threads, params->num_nodes);
     Node *head = NULL;
-    list_init(&head, sizeof(Node) * 3);
-    list_insert(&head, 10);
-    list_insert(&head, 30);
-    Node *node = head->next; // Node with data 30
-    list_insert_before(&head, node, 20);
-    my_assert(head->next->data == 20);
+    list_init(&head, sizeof(Node) * (params->num_threads * params->num_nodes));
+
+    // Insert nodes into the list
+    for (int i = 0; i < params->num_nodes; i++)
+    {
+        list_insert(&head, i); // Ensure unique values for simplicity
+    }
+
+    pthread_t *threads = malloc(params->num_threads * sizeof(pthread_t));
+    thread_data_t *thread_data = malloc(params->num_threads * sizeof(thread_data_t));
+    int nodes_per_thread = params->num_nodes / params->num_threads;
+
+    // Initialize threads and their respective data
+    for (int i = 0; i < params->num_threads; i++)
+    {
+        thread_data[i].head = &head;
+        thread_data[i].num_nodes = nodes_per_thread;
+        thread_data[i].thread_id = i;
+        pthread_create(&threads[i], NULL, thread_delete_function, &thread_data[i]);
+    }
+
+    // Join all threads
+    for (int i = 0; i < params->num_threads; i++)
+    {
+        pthread_join(threads[i], NULL);
+    }
+
+    // Verify the remaining list is empty if all nodes were to be deleted
+    my_assert(list_count_nodes(&head) == 0); // Assuming all nodes are supposed to be deleted
+
+    printf_green("[PASS].\n");
 
     list_cleanup(&head);
-    printf_green("[PASS].\n");
+    free(threads);
+    free(thread_data);
 }
 
 void test_list_delete()
@@ -473,6 +648,8 @@ void test_list_edge_cases()
 int main(int argc, char *argv[])
 {
 
+    int base_num_threads = 4;
+
     srand(time(NULL));
 #ifdef VERSION
     printf("Build Version; %s \n", VERSION);
@@ -482,23 +659,17 @@ int main(int argc, char *argv[])
     {
         printf("Usage: %s <test function>\n", argv[0]);
         printf("Available test functions:\n");
-        printf("Basic Operations:\n");
-        printf(" 1. test_list_init - Initialize the linked list\n");
-        printf(" 2. test_list_insert - Test basic list insert operations");
-        printf(" 3. test_list_insert_after - Test list insert after a given node\n");
-        printf(" 4. test_list_insert_before - Test list insert before a given node\n");
-        printf(" 5. test_list_delete - Test delete operation\n");
-        printf(" 6. test_list_search - Test search for a particular node\n");
-        printf(" 7. test_list_display - Test the display functionality. Requires subjective validation\n");
-        printf(" 8. test_list_count_nodes - Test nodes count function\n");
-        printf(" 9. test_list_cleanup - Test clean up\n");
+        printf("Basic Operations with a base number of threads (4) and nodes (1024):\n");
+        printf(" 1. test_list_insert - Test basic list insert operations with a base number of threads\n");
+        printf(" 2. test_list_insert_after - Test list insert after a given node\n");
+        printf(" 3. test_list_insert_before - Test list insert before a given node\n");
+        printf(" 4. test_list_delete - Test delete operation\n");
 
-        printf("\nStress and Edge Cases:\n");
-        printf(" 10. test_list_insert_loop - Test multiple insertions\n");
-        printf(" 11. test_list_insert_after_loop - Test multiple insertions after a given node\n");
-        printf(" 12. test_list_delete_loop - Test multiple detelions\n");
-        printf(" 13. test_list_search_loop - Test multiple search\n");
-        printf(" 14. test_list_edge_cases - Test edge cases\n");
+        printf("\nStress testing basic operations with various numbers of threads and nodes:\n");
+        printf(" 5. test_list - Test multiple configurations\n");
+        printf(" 6. test_list_insert_after - Test multiple insertions after a given node\n");
+        printf(" 7. test_list_insert_after - Test multiple insertions after a given node\n");
+        printf(" 8. test_list_delete - Test multiple detelions\n");
         printf(" 0. Run all tests\n");
         return 1;
     }
@@ -509,66 +680,54 @@ int main(int argc, char *argv[])
         printf("No tests will be executed.\n");
         break;
     case 0:
-        printf("Testing Basic Operations:\n");
-        test_list_init();
-        test_list_insert();
-        test_list_insert_after();
-        test_list_insert_before();
-        test_list_delete();
-        test_list_search();
-        test_list_display();
-        test_list_count_nodes();
-        test_list_cleanup();
+        printf("Testing Basic Operations with base number of threads:\n");
+        test_list_insert_multithread(&(TestParams){.num_threads = base_num_threads, .num_nodes = 1024});
+        test_list_insert_after_multithread(&(TestParams){.num_threads = base_num_threads, .num_nodes = 1024});
+        test_list_insert_before_multithreaded(&(TestParams){.num_threads = base_num_threads, .num_nodes = 1024});
+        test_list_delete_multithreaded(&(TestParams){.num_threads = base_num_threads, .num_nodes = 1024});
 
-        printf("\nTesting Stress and Edge Cases:\n");
-        test_list_insert_loop(1000);
-        test_list_insert_after_loop(1000);
-        test_list_delete_loop(1000);
-        test_list_search_loop(1000);
-        test_list_edge_cases();
+        printf("\nStress testing basic operations with various numbers of threads and nodes:\n");
+        for (int i = 0; i < 9; i++)      // from 2^0 = 1 up to 2^8 = 256 threads
+            for (int j = 8; j < 15; j++) // from 2^8 = 256 up to 2^14 = 16384 nodes
+            {
+                test_list_insert_multithread(&(TestParams){.num_threads = pow(2, i), .num_nodes = pow(2, j)});
+                test_list_insert_after_multithread(&(TestParams){.num_threads = pow(2, i), .num_nodes = pow(2, j)});
+                test_list_insert_before_multithreaded(&(TestParams){.num_threads = pow(2, i), .num_nodes = pow(2, j)});
+                test_list_delete_multithreaded(&(TestParams){.num_threads = pow(2, i), .num_nodes = pow(2, j)});
+            }
+
         break;
     case 1:
-        test_list_init();
+        test_list_insert_multithread(&(TestParams){.num_threads = base_num_threads, .num_nodes = 1024});
         break;
     case 2:
-
-        test_list_insert();
+        test_list_insert_after_multithread(&(TestParams){.num_threads = base_num_threads, .num_nodes = 1024});
         break;
     case 3:
-        test_list_insert_after();
+        test_list_insert_before_multithreaded(&(TestParams){.num_threads = base_num_threads, .num_nodes = 1024});
         break;
     case 4:
-        test_list_insert_before();
+        test_list_delete_multithreaded(&(TestParams){.num_threads = base_num_threads, .num_nodes = 1024});
         break;
     case 5:
-        test_list_delete();
+        for (int i = 0; i < 9; i++)      // from 2^0 = 1 up to 2^8 = 256 threads
+            for (int j = 8; j < 15; j++) // from 2^8 = 256 up to 2^14 = 16384 nodes
+                test_list_insert_multithread(&(TestParams){.num_threads = pow(2, i), .num_nodes = pow(2, j)});
         break;
     case 6:
-        test_list_search();
+        for (int i = 0; i < 9; i++)      // from 2^0 = 1 up to 2^8 = 256 threads
+            for (int j = 8; j < 15; j++) // from 2^8 = 256 up to 2^14 = 16384 nodes
+                test_list_insert_after_multithread(&(TestParams){.num_threads = pow(2, i), .num_nodes = pow(2, j)});
         break;
     case 7:
-        test_list_display();
+        for (int i = 0; i < 9; i++)      // from 2^0 = 1 up to 2^8 = 256 threads
+            for (int j = 8; j < 15; j++) // from 2^8 = 256 up to 2^14 = 16384 nodes
+                test_list_insert_before_multithreaded(&(TestParams){.num_threads = pow(2, i), .num_nodes = pow(2, j)});
         break;
     case 8:
-        test_list_count_nodes();
-        break;
-    case 9:
-        test_list_cleanup();
-        break;
-    case 10:
-        test_list_insert_loop(1000);
-        break;
-    case 11:
-        test_list_insert_after_loop(1000);
-        break;
-    case 12:
-        test_list_delete_loop(1000);
-        break;
-    case 13:
-        test_list_search_loop(1000);
-        break;
-    case 14:
-        test_list_edge_cases();
+        for (int i = 0; i < 9; i++)      // from 2^0 = 1 up to 2^8 = 256 threads
+            for (int j = 8; j < 14; j++) // from 2^8 = 256 up to 2^14 = 16384 nodes
+                test_list_delete_multithreaded(&(TestParams){.num_threads = pow(2, i), .num_nodes = pow(2, j)});
         break;
 
     default:

@@ -1,48 +1,50 @@
-# Compiler and Linking Variables
-CC = gcc
-CFLAGS = -Wall -fPIC
-LIB_NAME = libmemory_manager.so
+# Compiler and flags
+CC = g++
+CFLAGS = -Wall -fPIC -pthread
 
-# Source and Object Files
-SRC = memory_manager.c
-OBJ = $(SRC:.c=.o)
+# Source files
+MEMORY_MANAGER_SRC = memory_manager.c
+LINKED_LIST_SRC = linked_list.c
 
-# Default target
-all: mmanager list test_mmanager test_list
+# Object files
+MEMORY_MANAGER_OBJ = memory_manager.o
+LINKED_LIST_OBJ = linked_list.o
 
-# Rule to create the dynamic library
-$(LIB_NAME): $(OBJ)
-	$(CC) -shared -o $@ $(OBJ)
+# Library name based on the OS
+ifeq ($(OS),Windows_NT)
+    LIBRARY_NAME = libmemory_manager.dll
+    CLEAN_CMD = del /q
+else
+    LIBRARY_NAME = libmemory_manager.so
+    CLEAN_CMD = rm -f
+endif
 
-# Rule to compile source files into object files
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+# Targets
+all: mmanager list
 
-# Build the memory manager
-mmanager: $(LIB_NAME)
+# Build the memory manager dynamic library
+mmanager: $(MEMORY_MANAGER_OBJ)
+	$(CC) -shared -o $(LIBRARY_NAME) $(MEMORY_MANAGER_OBJ)
+	@echo "Compiled memory manager as a dynamic library: $(LIBRARY_NAME)"
 
-# Build the linked list
-list: linked_list.o
+# Build the linked list application
+list: $(LINKED_LIST_OBJ)
+	$(CC) $(CFLAGS) -o linked_list_app $(LINKED_LIST_OBJ) -L. -l:$(LIBRARY_NAME)
+	@echo "Compiled linked list application: linked_list_app"
 
-# Test target to run the memory manager test program
-test_mmanager: $(LIB_NAME)
-	$(CC) -o test_memory_manager test_memory_manager.c -L. -lmemory_manager
+# Compile memory manager source file
+$(MEMORY_MANAGER_OBJ): $(MEMORY_MANAGER_SRC)
+	$(CC) $(CFLAGS) -c $(MEMORY_MANAGER_SRC) -o $(MEMORY_MANAGER_OBJ)
+	@echo "Compiled: $(MEMORY_MANAGER_SRC)"
 
-# Test target to run the linked list test program
-test_list: $(LIB_NAME) linked_list.o
-	$(CC) -o test_linked_list linked_list.c test_linked_list.c -L. -lmemory_manager
-	
-#run tests
-run_tests: run_test_mmanager run_test_list
-	
-# run test cases for the memory manager
-run_test_mmanager:
-	./test_memory_manager
+# Compile linked list source file
+$(LINKED_LIST_OBJ): $(LINKED_LIST_SRC)
+	$(CC) $(CFLAGS) -c $(LINKED_LIST_SRC) -o $(LINKED_LIST_OBJ)
+	@echo "Compiled: $(LINKED_LIST_SRC)"
 
-# run test cases for the linked list
-run_test_list:
-	./test_linked_list
-
-# Clean target to clean up build files
+# Clean up
 clean:
-	rm -f $(OBJ) $(LIB_NAME) test_memory_manager test_linked_list linked_list.o
+	$(CLEAN_CMD) $(MEMORY_MANAGER_OBJ) $(LINKED_LIST_OBJ) $(LIBRARY_NAME) linked_list_app
+	@echo "Cleaned up project files"
+
+.PHONY: all mmanager list clean
