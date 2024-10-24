@@ -4,7 +4,7 @@
 #include <sys/mman.h>
 #include "memory_manager.h"
 
-#define MEMORY_SIZE 5000
+#define MEMORY_SIZE 5000 // Size for initial memory allocation
 
 typedef struct MemoryBlock {
     size_t size;               // Size of the allocated memory block
@@ -12,19 +12,41 @@ typedef struct MemoryBlock {
     void *ptr;                // Pointer to the allocated memory
 } MemoryBlock;
 
-MemoryBlock *head = NULL;      // Head of the linked list of memory blocks
+MemoryBlock *head = NULL; // Head of the linked list of memory blocks
+
+// Initialize memory manager
+void mem_init() {
+    head = NULL; // Reset the linked list
+}
+
+// Deinitialize memory manager
+void mem_deinit() {
+    MemoryBlock *current = head;
+    while (current != NULL) {
+        MemoryBlock *next = current->next;
+        munmap(current->ptr, current->size); // Free each allocated memory block
+        // The following line is optional; it's good practice to ensure
+        // you're not holding onto a pointer to freed memory
+        free(current);
+        current = next; // Move to the next block
+    }
+    head = NULL; // Clear the list
+}
 
 // Custom memory allocation function
-void *my_malloc(size_t size) {
+void *mem_alloc(size_t size) {
     if (size <= 0) return NULL; // Invalid size
 
     // Allocate space for the memory block structure
-    MemoryBlock *block = (MemoryBlock *)sbrk(sizeof(MemoryBlock));
-    if (block == (void *)-1) return NULL; // Allocation failed
+    MemoryBlock *block = (MemoryBlock *)malloc(sizeof(MemoryBlock));
+    if (block == NULL) return NULL; // Allocation failed
 
     // Allocate the requested memory using mmap
     block->ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (block->ptr == MAP_FAILED) return NULL; // mmap failed
+    if (block->ptr == MAP_FAILED) {
+        free(block); // Free the block structure if mmap fails
+        return NULL; // mmap failed
+    }
 
     block->size = size;         // Set the size of the block
     block->next = head;         // Link to the previous head
@@ -34,7 +56,7 @@ void *my_malloc(size_t size) {
 }
 
 // Custom memory free function
-void my_free(void *ptr) {
+void mem_free(void *ptr) {
     if (ptr == NULL) return; // Nothing to free
 
     MemoryBlock *current = head;
@@ -49,14 +71,12 @@ void my_free(void *ptr) {
                 head = current->next; // Update head if freeing the first block
             }
             munmap(current->ptr, current->size); // Free the allocated memory
-            // Free the memory block structure
-            brk(current); // Adjust program break to free the block metadata
+            free(current); // Free the memory block structure
             return;
         }
         prev = current; // Move to the next block
         current = current->next;
     }
-    // Pointer was not found
 }
 
 // Optional: Print currently allocated memory blocks for debugging
