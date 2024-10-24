@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "memory_manager.h"
 
 #define MEMORY_POOL_SIZE 5000 // Size of the memory pool
 
@@ -16,21 +15,17 @@ typedef struct Block {
 } Block;
 
 static Block *free_list = NULL; // Pointer to the start of the free list
-static int initialized = 0; // Initialization flag
+static int initialized = 0;     // Flag to check if memory manager is initialized
 
 // Initialize the memory manager
 void mem_init(size_t size) {
-    if (initialized) {
-        fprintf(stderr, "Memory manager already initialized.\n");
-        return; // or handle error
-    }
     pool_size = size;
 
     // Allocate the memory pool using malloc
     memory_pool = (char *)malloc(pool_size);
     if (memory_pool == NULL) {
         fprintf(stderr, "Failed to allocate memory pool with malloc\n");
-        return; // or handle error
+        exit(EXIT_FAILURE);
     }
 
     // Set up the initial block
@@ -38,7 +33,8 @@ void mem_init(size_t size) {
     free_list->size = pool_size - sizeof(Block); // Set the size of the block
     free_list->next = NULL; // No next block
     free_list->free = 1; // Mark the block as free
-    initialized = 1; // Mark as initialized
+
+    initialized = 1; // Set the initialized flag
 }
 
 // Allocate a block of memory
@@ -49,7 +45,6 @@ void *mem_alloc(size_t size) {
     }
 
     Block *current = free_list;
-    Block *prev = NULL;
 
     // Align size to the nearest multiple of sizeof(size_t)
     size_t aligned_size = (size + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1);
@@ -68,9 +63,8 @@ void *mem_alloc(size_t size) {
                 current->size = aligned_size - sizeof(Block);
             }
             current->free = 0; // Mark block as allocated
-            return (char *)current + sizeof(Block);
+            return (char *)current + sizeof(Block); // Return pointer to the allocated memory
         }
-        prev = current;
         current = current->next;
     }
     // No suitable block found
@@ -83,27 +77,37 @@ void mem_free(void *block) {
 
     // Get the block header
     Block *returned_block = (Block *)((char *)block - sizeof(Block));
+    if (returned_block->free) {
+        fprintf(stderr, "Attempted to free an already freed block.\n");
+        return; // Handle error (double free)
+    }
     returned_block->free = 1; // Mark block as free
 
     // Coalesce adjacent free blocks
     Block *current = free_list;
+
+    // Start by checking if we can coalesce with the previous or next blocks
     while (current) {
-        // Coalesce with next block
+        // Coalesce with the next block
         if (current->free && (char *)current + sizeof(Block) + current->size == (char *)returned_block) {
             current->size += returned_block->size + sizeof(Block);
-            returned_block = current; // Update returned_block to the new coalesced block
+            returned_block = current; // Update to the coalesced block
+            returned_block->next = current->next; // Bypass the current block
+        } else {
+            // Move to the next block
+            current = current->next;
         }
-        current = current->next;
+
+        // Check if the next block can be coalesced
+        if (returned_block->next && returned_block->next->free) {
+            returned_block->size += returned_block->next->size + sizeof(Block);
+            returned_block->next = returned_block->next->next; // Bypass the next block
+        }
     }
 }
 
 // Resize the allocated memory block
 void *mem_resize(void *block, size_t size) {
-    if (!initialized) {
-        fprintf(stderr, "Memory manager not initialized.\n");
-        return NULL; // Handle error
-    }
-
     if (!block) return mem_alloc(size);
     if (size == 0) {
         mem_free(block);
@@ -127,21 +131,15 @@ void *mem_resize(void *block, size_t size) {
 
 // Free the entire memory pool
 void mem_deinit() {
-    if (!initialized) return; // Ignore if not initialized
     free(memory_pool); // Free the memory pool using free
     memory_pool = NULL;
     pool_size = 0;
     free_list = NULL; // Clear the free list
-    initialized = 0; // Reset initialization flag
+    initialized = 0; // Reset the initialized flag
 }
 
 // Utility function to print the free list for debugging
 void print_free_list() {
-    if (!initialized) {
-        printf("Memory manager not initialized.\n");
-        return;
-    }
-
     Block *current = free_list;
     printf("Free list:\n");
     while (current) {
