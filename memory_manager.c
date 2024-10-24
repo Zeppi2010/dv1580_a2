@@ -3,7 +3,7 @@
 #include <string.h>
 #include "memory_manager.h"
 
-#define MEMORY_POOL_SIZE 5000 // Define the size of the memory pool
+#define MEMORY_POOL_SIZE 5000 // Size of the memory pool
 
 // Static variables for memory management
 static char *memory_pool = NULL; // Pointer to the memory pool
@@ -77,13 +77,13 @@ void mem_free(void *block) {
     // Coalesce adjacent free blocks
     Block *current = free_list;
     while (current) {
+        // Coalesce with previous block
         if (current->free && (char *)current + sizeof(Block) + current->size == (char *)returned_block) {
-            // Coalesce with previous block
             current->size += returned_block->size + sizeof(Block);
             returned_block = current; // Update returned_block to the new coalesced block
         }
+        // Coalesce with next block
         if (returned_block->free && (char *)returned_block + sizeof(Block) + returned_block->size == (char *)current) {
-            // Coalesce with next block
             returned_block->size += current->size + sizeof(Block);
             returned_block->next = current->next; // Bypass the current block
         }
@@ -120,4 +120,14 @@ void mem_deinit() {
     memory_pool = NULL;
     pool_size = 0;
     free_list = NULL; // Clear the free list
+}
+
+// Utility function to print the free list for debugging
+void print_free_list() {
+    Block *current = free_list;
+    printf("Free list:\n");
+    while (current) {
+        printf("Block at %p, size: %zu, free: %d\n", (void *)current, current->size, current->free);
+        current = current->next;
+    }
 }
