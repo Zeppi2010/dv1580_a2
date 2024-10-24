@@ -6,6 +6,7 @@
 
 #define MEMORY_POOL_SIZE 5000 // Size of the memory pool
 
+// Static variables for memory management
 static char *memory_pool = NULL; // Pointer to the memory pool
 static size_t pool_size = 0;      // Size of the memory pool
 
@@ -18,6 +19,7 @@ static Block *free_list = NULL; // Pointer to the start of the free list
 
 // Initialize the memory manager
 void mem_init(size_t size) {
+    // Ensure that we are using mmap exclusively for memory allocation
     pool_size = size;
     memory_pool = mmap(NULL, pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (memory_pool == MAP_FAILED) {
