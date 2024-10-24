@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
-#include <stdalign.h>  // For alignof
+#include <stdint.h>   // For uintptr_t
+#include <stdalign.h> // For alignof (C11 feature, fallback will be handled)
+#include <stddef.h>   // For size_t
 
 #define MIN_SIZE 32    // Minimum block size
 
@@ -14,9 +16,14 @@ typedef struct {
 void* memoryPool = NULL;
 size_t pool_size = 0;
 BlockMeta blockMetaArray[1000];  // Array to hold block metadata (modify the size as needed)
-size_t blockCount = 0;           // Number of blocks
+size_t blockCount = 0;
 
 pthread_mutex_t memory_lock;  // Mutex for thread safety
+
+// Fallback for max_align_t if not available (C11)
+#ifndef max_align_t
+typedef struct { alignas(16) char c[16]; } max_align_t;
+#endif
 
 // Helper function to ensure proper alignment
 void* align_ptr(void* ptr, size_t alignment) {
@@ -30,7 +37,7 @@ void mem_init(size_t size) {
         printf("Failed to initialize memory pool.\n");
         exit(1);
     }
-    
+
     memoryPool = align_ptr(memoryPool, alignof(max_align_t));  // Ensure alignment for all types
     pool_size = size;
 
