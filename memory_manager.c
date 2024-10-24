@@ -1,125 +1,103 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
-#include <stdint.h>
 #include <string.h>
-#include <sys/mman.h>
 #include "memory_manager.h"
 
-#define MIN_SIZE sizeof(size_t) // Minimum size for allocation
-#define MEMORY_POOL_SIZE 5000 // Define the size of the memory pool as needed
+#define MEMORY_POOL_SIZE 10240 // Example size of the memory pool (10 KB)
 
-// Block metadata structure
-typedef struct BlockMeta {
-    size_t size; // Size of the block
-    int isFree; // Is the block free?
-} BlockMeta;
+static char *memory_pool = NULL; // Pointer to the memory pool
+static size_t pool_size = 0;      // Size of the memory pool
+static char *free_list;            // Pointer to the start of the free memory list
 
-static char *memoryPool;           // Pointer to the memory pool
-static BlockMeta *blockMetaArray;  // Array to hold metadata for blocks
-static size_t blockCount;           // Total number of blocks
-static pthread_mutex_t memory_lock; // Mutex for thread safety
+typedef struct Block {
+    size_t size;                    // Size of the block
+    struct Block *next;             // Pointer to the next block
+} Block;
 
-// Function to align a pointer
-void *align_ptr(void *ptr, size_t alignment) {
-    uintptr_t addr = (uintptr_t)ptr;
-    return (void *)(((addr + alignment - 1) / alignment) * alignment);
-}
-
-// Function to initialize the memory manager
+// Initialize the memory manager
 void mem_init(size_t size) {
-    // Allocate memory pool using mmap
-    memoryPool = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (memoryPool == MAP_FAILED) {
-        fprintf(stderr, "Error: Unable to allocate memory pool using mmap.\n");
+    pool_size = size;
+    memory_pool = (char *)malloc(pool_size);
+    if (!memory_pool) {
+        fprintf(stderr, "Failed to allocate memory pool\n");
         exit(EXIT_FAILURE);
     }
+    free_list = memory_pool; // Initially, the whole pool is free
 
-    // Calculate the number of blocks based on minimum size
-    blockCount = size / (MIN_SIZE + sizeof(BlockMeta)); 
-    blockMetaArray = (BlockMeta *)malloc(blockCount * sizeof(BlockMeta));
-    if (!blockMetaArray) {
-        fprintf(stderr, "Error: Unable to allocate metadata array.\n");
-        munmap(memoryPool, size);
-        exit(EXIT_FAILURE);
-    }
-
-    // Initialize the blocks
-    for (size_t i = 0; i < blockCount; ++i) {
-        blockMetaArray[i].size = (size / blockCount); // Each block has an equal size
-        blockMetaArray[i].isFree = 1;                // All blocks are initially free
-    }
-
-    // Align the memory pool
-    memoryPool = (char *)align_ptr(memoryPool, 16); // Use 16 for alignment
-    pthread_mutex_init(&memory_lock, NULL); // Initialize the mutex
+    // Set the initial block size
+    Block *initial_block = (Block *)free_list;
+    initial_block->size = pool_size - sizeof(Block);
+    initial_block->next = NULL;
 }
 
-// Function to allocate memory
+// Allocate a block of memory
 void *mem_alloc(size_t size) {
-    if (size == 0) return NULL; // Avoid zero-size allocation
+    Block *current = (Block *)free_list;
+    Block *prev = NULL;
 
-    pthread_mutex_lock(&memory_lock); // Lock
+    // Align size to the nearest multiple of sizeof(size_t)
+    size_t aligned_size = (size + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1);
+    aligned_size += sizeof(Block); // Account for the block header
 
-    // Ensure size is at least minimum size
-    size = (size < MIN_SIZE) ? MIN_SIZE : size;
+    // Search for a suitable block
+    while (current) {
+        if (current->size >= aligned_size) {
+            // Split the block if there's enough space left
+            if (current->size > aligned_size + sizeof(Block)) {
+                Block *new_block = (Block *)((char *)current + aligned_size);
+                new_block->size = current->size - aligned_size;
+                new_block->next = current->next;
+                current->next = new_block;
+                current->size = aligned_size;
+            }
 
-    // Find a suitable block
-    for (size_t i = 0; i < blockCount; ++i) {
-        if (blockMetaArray[i].isFree && blockMetaArray[i].size >= size) {
-            // Allocate the block
-            blockMetaArray[i].isFree = 0; // Mark as used
-            pthread_mutex_unlock(&memory_lock); // Unlock
-            return (char *)memoryPool + (i * (MIN_SIZE + sizeof(BlockMeta))); // Return the pointer to the allocated block
+            // Remove the block from the free list
+            if (prev) {
+                prev->next = current->next;
+            } else {
+                free_list = current->next;
+            }
+            return (char *)current + sizeof(Block);
         }
+        prev = current;
+        current = current->next;
     }
-
-    pthread_mutex_unlock(&memory_lock); // Unlock
     return NULL; // No suitable block found
 }
 
-// Function to free allocated memory
-void mem_free(void *ptr) {
-    if (ptr == NULL) return;
+// Free the allocated block of memory
+void mem_free(void *block) {
+    if (!block) return;
 
-    pthread_mutex_lock(&memory_lock); // Lock
-    size_t blockIndex = ((char *)ptr - (char *)memoryPool) / (MIN_SIZE + sizeof(BlockMeta));
-
-    if (blockIndex < blockCount) {
-        blockMetaArray[blockIndex].isFree = 1; // Mark the block as free
-    } else {
-        fprintf(stderr, "Error: Attempted to free invalid pointer.\n");
-    }
-
-    pthread_mutex_unlock(&memory_lock); // Unlock
+    Block *returned_block = (Block *)((char *)block - sizeof(Block));
+    returned_block->next = (Block *)free_list; // Add the block to the free list
+    free_list = (char *)returned_block;         // Update the free list pointer
 }
 
-// Function to resize allocated memory
+// Resize the allocated memory block
 void *mem_resize(void *block, size_t size) {
-    if (block == NULL) return mem_alloc(size); // If block is NULL, allocate new block
+    if (!block) return mem_alloc(size);
     if (size == 0) {
         mem_free(block);
-        return NULL; // Free block and return NULL
+        return NULL;
     }
 
-    pthread_mutex_lock(&memory_lock); // Lock
+    Block *old_block = (Block *)((char *)block - sizeof(Block));
+    size_t old_size = old_block->size - sizeof(Block);
+    if (size <= old_size) return block; // No need to resize
 
-    size_t oldSize = ((BlockMeta *)((char *)block - sizeof(BlockMeta)))->size; // Get the old block size
-    void *newBlock = mem_alloc(size); // Allocate a new block of the new size
-
-    if (newBlock) {
-        // Copy old data to new block
-        memcpy(newBlock, block, (oldSize < size) ? oldSize : size);
-        mem_free(block); // Free old block
+    void *new_block = mem_alloc(size);
+    if (new_block) {
+        memcpy(new_block, block, old_size);
+        mem_free(block);
     }
-
-    pthread_mutex_unlock(&memory_lock); // Unlock
-    return newBlock; // Return new block
+    return new_block;
 }
 
-// Function to clean up the memory manager
+// Free the entire memory pool
 void mem_deinit() {
-    munmap(memoryPool, MEMORY_POOL_SIZE); // Free mmaped memory
-    free(blockMetaArray);
-    pthread_mutex_destroy(&memory_lock);
+    free(memory_pool);
+    memory_pool = NULL;
+    pool_size = 0;
+    free_list = NULL;
 }
