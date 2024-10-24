@@ -1,4 +1,3 @@
-#include <sys/mman.h> // For mmap
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,11 +18,12 @@ static Block *free_list = NULL; // Pointer to the start of the free list
 
 // Initialize the memory manager
 void mem_init(size_t size) {
-    // Ensure that we are using mmap exclusively for memory allocation
     pool_size = size;
-    memory_pool = mmap(NULL, pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (memory_pool == MAP_FAILED) {
-        fprintf(stderr, "Failed to allocate memory pool with mmap\n");
+
+    // Allocate the memory pool using malloc
+    memory_pool = (char *)malloc(pool_size);
+    if (memory_pool == NULL) {
+        fprintf(stderr, "Failed to allocate memory pool with malloc\n");
         exit(EXIT_FAILURE);
     }
 
@@ -107,10 +107,8 @@ void *mem_resize(void *block, size_t size) {
 
 // Free the entire memory pool
 void mem_deinit() {
-    if (memory_pool) {
-        munmap(memory_pool, pool_size); // Free the memory pool
-        memory_pool = NULL;
-        pool_size = 0;
-        free_list = NULL; // Clear the free list
-    }
+    free(memory_pool); // Free the memory pool using free
+    memory_pool = NULL;
+    pool_size = 0;
+    free_list = NULL; // Clear the free list
 }
