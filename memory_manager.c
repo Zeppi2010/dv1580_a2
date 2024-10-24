@@ -3,7 +3,7 @@
 #include <string.h>
 #include "memory_manager.h"
 
-#define MEMORY_POOL_SIZE 5000 // Size of the memory pool
+#define MEMORY_POOL_SIZE 5000 // Define the size of the memory pool
 
 // Static variables for memory management
 static char *memory_pool = NULL; // Pointer to the memory pool
@@ -12,6 +12,7 @@ static size_t pool_size = 0;      // Size of the memory pool
 typedef struct Block {
     size_t size;                // Size of the block
     struct Block *next;         // Pointer to the next block
+    int free;                  // Is the block free?
 } Block;
 
 static Block *free_list = NULL; // Pointer to the start of the free list
@@ -31,6 +32,7 @@ void mem_init(size_t size) {
     free_list = (Block *)memory_pool; // Initially, the whole pool is free
     free_list->size = pool_size - sizeof(Block); // Set the size of the block
     free_list->next = NULL; // No next block
+    free_list->free = 1; // Mark the block as free
 }
 
 // Allocate a block of memory
@@ -44,23 +46,17 @@ void *mem_alloc(size_t size) {
 
     // Search for a suitable block
     while (current) {
-        if (current->size >= aligned_size) {
-            // Split the block if there's enough space left
-            if (current->size > aligned_size + sizeof(Block)) {
+        if (current->free && current->size >= aligned_size) {
+            // If there's enough space left, split the block
+            if (current->size >= aligned_size + sizeof(Block)) {
                 Block *new_block = (Block *)((char *)current + aligned_size);
                 new_block->size = current->size - aligned_size - sizeof(Block);
                 new_block->next = current->next;
+                new_block->free = 1;
                 current->next = new_block;
                 current->size = aligned_size - sizeof(Block);
-            } else {
-                // If not splitting, we just allocate the whole block
-                if (prev) {
-                    prev->next = current->next; // Bypass the current block
-                } else {
-                    free_list = current->next; // Move free list head
-                }
             }
-            // Return pointer to the usable memory
+            current->free = 0; // Mark block as allocated
             return (char *)current + sizeof(Block);
         }
         prev = current;
@@ -76,34 +72,22 @@ void mem_free(void *block) {
 
     // Get the block header
     Block *returned_block = (Block *)((char *)block - sizeof(Block));
+    returned_block->free = 1; // Mark block as free
 
-    // Inserting into the free list without overlaps
+    // Coalesce adjacent free blocks
     Block *current = free_list;
-    Block *prev = NULL;
-
-    // Iterate to find the right position to insert the returned block
-    while (current && current < returned_block) {
-        prev = current;
-        current = current->next;
-    }
-
-    // Check for overlaps with existing blocks
-    Block *iterator = free_list;
-    while (iterator) {
-        if ((char *)iterator < (char *)returned_block + returned_block->size + sizeof(Block) &&
-            (char *)iterator + iterator->size + sizeof(Block) > (char *)returned_block) {
-            fprintf(stderr, "Error: Overlapping blocks detected!\n");
-            return; // Overlap detected, do not free
+    while (current) {
+        if (current->free && (char *)current + sizeof(Block) + current->size == (char *)returned_block) {
+            // Coalesce with previous block
+            current->size += returned_block->size + sizeof(Block);
+            returned_block = current; // Update returned_block to the new coalesced block
         }
-        iterator = iterator->next;
-    }
-
-    // Insert returned block into the free list
-    returned_block->next = current; 
-    if (prev) {
-        prev->next = returned_block; // Insert in the middle or end
-    } else {
-        free_list = returned_block; // Update free list head
+        if (returned_block->free && (char *)returned_block + sizeof(Block) + returned_block->size == (char *)current) {
+            // Coalesce with next block
+            returned_block->size += current->size + sizeof(Block);
+            returned_block->next = current->next; // Bypass the current block
+        }
+        current = current->next;
     }
 }
 
