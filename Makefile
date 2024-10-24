@@ -4,15 +4,15 @@ CFLAGS = -Wall -fPIC
 LIB_NAME = libmemory_manager.so
 
 # Source and Object Files
-SRC = memory_manager.c
+SRC = memory_manager.c linked_list.c
 OBJ = $(SRC:.c=.o)
 
 # Default target
 all: mmanager list test_mmanager test_list
 
 # Rule to create the dynamic library
-$(LIB_NAME): $(OBJ)
-	$(CC) -shared -o $@ $(OBJ)
+$(LIB_NAME): memory_manager.o
+	$(CC) -shared -o $@ $^
 
 # Rule to compile source files into object files
 %.o: %.c
@@ -21,8 +21,9 @@ $(LIB_NAME): $(OBJ)
 # Build the memory manager
 mmanager: $(LIB_NAME)
 
-# Build the linked list
-list: linked_list.o
+# Build the linked list object
+linked_list.o: linked_list.c linked_list.h
+	$(CC) $(CFLAGS) -c linked_list.c -o linked_list.o
 
 # Test target to run the memory manager test program
 test_mmanager: $(LIB_NAME)
@@ -30,7 +31,7 @@ test_mmanager: $(LIB_NAME)
 
 # Test target to run the linked list test program
 test_list: $(LIB_NAME) linked_list.o
-	$(CC) -o test_linked_list linked_list.c test_linked_list.c -L. -lmemory_manager -lm -lpthread
+	$(CC) -o test_linked_list linked_list.o test_linked_list.c -L. -lmemory_manager -lm -lpthread
 
 # Run tests
 run_tests: run_test_mmanager run_test_list
