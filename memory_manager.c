@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <pthread.h>  // For POSIX threads
 #include <string.h>   // For memcpy
+#include <stdint.h>   // For uintptr_t
 
 #define MIN_SIZE 32   // Minimum block size
 
@@ -22,7 +23,8 @@ void* align_ptr(void* ptr, size_t alignment) {
     if (alignment < sizeof(void*)) {
         alignment = sizeof(void*);
     }
-    return (void*)(((uintptr_t)ptr + alignment - 1) & ~(alignment - 1));
+    uintptr_t addr = (uintptr_t)ptr;
+    return (void*)((addr + alignment - 1) & ~(alignment - 1));
 }
 
 // Initialize the memory manager and the pool
@@ -39,7 +41,7 @@ void mem_init(size_t size) {
     pthread_mutex_init(&memory_lock, NULL);
 
     // Align memory pool
-    memoryPool = align_ptr(memoryPool, alignof(max_align_t));  // Ensure alignment for all types
+    memoryPool = align_ptr(memoryPool, sizeof(void*));  // Ensure alignment for all types
 
     // Initialize the metadata array with a single large free block
     blockMetaArray[0].size = size;
