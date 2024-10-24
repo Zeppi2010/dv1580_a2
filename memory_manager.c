@@ -45,8 +45,9 @@ void* mem_alloc(size_t size) {
         return NULL;
     }
 
-    // Align size to a multiple of 8 bytes
-    size = (size + sizeof(Block) + 7) & ~7;
+    // Align size to a multiple of 8 bytes and add block header size
+    size = (size + 7) & ~7; // Align to 8 bytes
+    size += sizeof(Block); // Include size for the block header
 
     Block* current = free_list;
     Block* previous = NULL;
@@ -54,19 +55,24 @@ void* mem_alloc(size_t size) {
     // Traverse the free list to find a suitable block
     while (current) {
         if (current->size >= size) { // Found a block large enough
-            if (current->size > size + sizeof(Block)) { // Split block if too large
-                Block* new_block = (Block*)((char*)current + sizeof(Block) + size);
-                new_block->size = current->size - size - sizeof(Block);
+            // Split block if it is larger than needed
+            if (current->size > size + sizeof(Block)) {
+                Block* new_block = (Block*)((char*)current + size);
+                new_block->size = current->size - size;
                 new_block->next = current->next;
-                current->next = new_block;
+
+                // Update the current block
                 current->size = size;
+                current->next = new_block;
             }
+
             // Remove the current block from the free list
             if (previous) {
                 previous->next = current->next;
             } else {
                 free_list = current->next; // Update head of free list
             }
+
             return (void*)((char*)current + sizeof(Block)); // Return pointer to user space
         }
         previous = current;
