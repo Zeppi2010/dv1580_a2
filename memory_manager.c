@@ -1,12 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
-#include <string.h>
-#include <stdint.h>   // For uintptr_t
-#include <stdalign.h> // For alignof (C11 feature)
-#include <stddef.h>   // For size_t
+#include <pthread.h>  // For POSIX threads
+#include <string.h>   // For memcpy
 
-#define MIN_SIZE 32    // Minimum block size
+#define MIN_SIZE 32   // Minimum block size
 
 typedef struct {
     size_t size;  // Size of the block
@@ -16,44 +13,46 @@ typedef struct {
 void* memoryPool = NULL;
 size_t pool_size = 0;
 BlockMeta blockMetaArray[1000];  // Array to hold block metadata (modify the size as needed)
-size_t blockCount = 0;
+size_t blockCount = 0;           // Number of blocks
 
 pthread_mutex_t memory_lock;  // Mutex for thread safety
 
-// Helper function to ensure proper alignment
+// Function to align a pointer
 void* align_ptr(void* ptr, size_t alignment) {
+    if (alignment < sizeof(void*)) {
+        alignment = sizeof(void*);
+    }
     return (void*)(((uintptr_t)ptr + alignment - 1) & ~(alignment - 1));
 }
 
 // Initialize the memory manager and the pool
 void mem_init(size_t size) {
     memoryPool = malloc(size);
+    pool_size = size;
+
     if (!memoryPool) {
         printf("Failed to initialize memory pool.\n");
         exit(1);
     }
 
-    memoryPool = align_ptr(memoryPool, alignof(max_align_t));  // Ensure alignment for all types
-    pool_size = size;
-
     // Initialize the mutex
-    if (pthread_mutex_init(&memory_lock, NULL) != 0) {
-        printf("Mutex init failed.\n");
-        free(memoryPool);
-        exit(1);
-    }
+    pthread_mutex_init(&memory_lock, NULL);
+
+    // Align memory pool
+    memoryPool = align_ptr(memoryPool, alignof(max_align_t));  // Ensure alignment for all types
 
     // Initialize the metadata array with a single large free block
     blockMetaArray[0].size = size;
     blockMetaArray[0].isFree = 1;
     blockCount = 1;
-
     printf("Memory pool initialized with size: %zu\n", size);
 }
 
 // Allocate memory from the pool
 void* mem_alloc(size_t size) {
-    if (size == 0) return NULL;  // No allocation for zero size
+    if (size == 0) {
+        return NULL;  // Handle zero allocation request
+    }
 
     pthread_mutex_lock(&memory_lock);  // Lock
 
@@ -61,19 +60,22 @@ void* mem_alloc(size_t size) {
         if (blockMetaArray[i].isFree && blockMetaArray[i].size >= size) {
             size_t remainingSize = blockMetaArray[i].size - size;
 
+            // If there's enough space to split the block
             if (remainingSize >= MIN_SIZE + sizeof(BlockMeta)) {
                 blockMetaArray[i].size = size;
                 blockMetaArray[i].isFree = 0;
 
+                // Add new free block
                 blockMetaArray[blockCount].size = remainingSize;
                 blockMetaArray[blockCount].isFree = 1;
                 blockCount++;
+                printf("Allocating memory at block %zu, size: %zu (splitting)\n", i, size);
             } else {
-                blockMetaArray[i].isFree = 0;
+                blockMetaArray[i].isFree = 0; // Allocate the whole block
+                printf("Allocating memory at block %zu, size: %zu (no split)\n", i, size);
             }
 
             pthread_mutex_unlock(&memory_lock);  // Unlock
-            printf("Allocating memory at block %zu, size: %zu\n", i, size);
             return (char*)memoryPool + (i * MIN_SIZE);
         }
     }
@@ -90,13 +92,8 @@ void mem_free(void* ptr) {
     pthread_mutex_lock(&memory_lock);  // Lock
 
     size_t blockIndex = ((char*)ptr - (char*)memoryPool) / MIN_SIZE;
-    if (blockIndex >= blockCount) {
-        printf("Error: Invalid pointer passed to mem_free.\n");
-        pthread_mutex_unlock(&memory_lock);
-        return;
-    }
-
     printf("Freeing memory at block %zu\n", blockIndex);
+
     blockMetaArray[blockIndex].isFree = 1;
 
     // Merge with next block if free
@@ -106,6 +103,7 @@ void mem_free(void* ptr) {
             blockMetaArray[i] = blockMetaArray[i + 1];
         }
         blockCount--;
+        printf("Merged with next block, new size: %zu\n", blockMetaArray[blockIndex].size);
     }
 
     // Merge with previous block if free
@@ -115,6 +113,7 @@ void mem_free(void* ptr) {
             blockMetaArray[i] = blockMetaArray[i + 1];
         }
         blockCount--;
+        printf("Merged with previous block, new size: %zu\n", blockMetaArray[blockIndex - 1].size);
     }
 
     pthread_mutex_unlock(&memory_lock);  // Unlock
@@ -122,35 +121,43 @@ void mem_free(void* ptr) {
 
 // Resize an allocated memory block
 void* mem_resize(void* ptr, size_t newSize) {
-    if (ptr == NULL) return mem_alloc(newSize);
+    if (ptr == NULL) {
+        return mem_alloc(newSize);
+    }
+
+    if (newSize == 0) {
+        mem_free(ptr);
+        return NULL;
+    }
 
     pthread_mutex_lock(&memory_lock);  // Lock
 
     size_t blockIndex = ((char*)ptr - (char*)memoryPool) / MIN_SIZE;
     BlockMeta* block = &blockMetaArray[blockIndex];
 
-    // If current block can accommodate the new size, return the same pointer
     if (block->size >= newSize) {
         pthread_mutex_unlock(&memory_lock);  // Unlock
-        return ptr;
+        return ptr;  // No need to resize
     }
 
-    // Try to merge with the next block if it's free
+    // Try to expand with next block if free
     if (blockIndex + 1 < blockCount && blockMetaArray[blockIndex + 1].isFree) {
         BlockMeta* nextBlock = &blockMetaArray[blockIndex + 1];
         if (block->size + nextBlock->size >= newSize) {
             block->size += nextBlock->size;
-            nextBlock->isFree = 0;  // Mark the next block as used
+            nextBlock->isFree = 0;
+            printf("Resized block %zu to new size: %zu (merged with next block)\n", blockIndex, block->size);
             pthread_mutex_unlock(&memory_lock);  // Unlock
             return ptr;
         }
     }
 
-    // Allocate a new block if resize in place is not possible
+    // Allocate new block
     void* new_block = mem_alloc(newSize);
     if (new_block != NULL) {
-        memcpy(new_block, ptr, block->size);  // Copy existing data
-        mem_free(ptr);  // Free the old block
+        memcpy(new_block, ptr, block->size);  // Copy old data
+        mem_free(ptr);  // Free old block
+        printf("Allocated new block for resizing, old block freed\n");
     }
 
     pthread_mutex_unlock(&memory_lock);  // Unlock
@@ -159,15 +166,10 @@ void* mem_resize(void* ptr, size_t newSize) {
 
 // Deinitialize the memory pool and destroy the mutex
 void mem_deinit() {
-    pthread_mutex_lock(&memory_lock);  // Lock before cleanup
-
     pthread_mutex_destroy(&memory_lock);  // Destroy the mutex
-    free(memoryPool);  // Free the memory pool
+    free(memoryPool);
     memoryPool = NULL;
     pool_size = 0;
     blockCount = 0;
-
-    pthread_mutex_unlock(&memory_lock);  // Unlock after cleanup
-
     printf("Memory pool deinitialized.\n");
 }
