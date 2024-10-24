@@ -77,24 +77,34 @@ void mem_free(void *block) {
     // Get the block header
     Block *returned_block = (Block *)((char *)block - sizeof(Block));
 
-    // Resetting any previous free status
+    // Inserting into the free list without overlaps
     Block *current = free_list;
     Block *prev = NULL;
 
-    // Check if the returned block is overlapping with the free list blocks
-    while (current) {
-        if ((char *)current >= (char *)returned_block && 
-            (char *)current < (char *)returned_block + returned_block->size + sizeof(Block)) {
-            fprintf(stderr, "Error: Overlapping blocks detected!\n");
-            return; // Overlap detected, do not free
-        }
+    // Iterate to find the right position to insert the returned block
+    while (current && current < returned_block) {
         prev = current;
         current = current->next;
     }
 
+    // Check for overlaps with existing blocks
+    Block *iterator = free_list;
+    while (iterator) {
+        if ((char *)iterator < (char *)returned_block + returned_block->size + sizeof(Block) &&
+            (char *)iterator + iterator->size + sizeof(Block) > (char *)returned_block) {
+            fprintf(stderr, "Error: Overlapping blocks detected!\n");
+            return; // Overlap detected, do not free
+        }
+        iterator = iterator->next;
+    }
+
     // Insert returned block into the free list
-    returned_block->next = free_list; 
-    free_list = returned_block; // Update free list head
+    returned_block->next = current; 
+    if (prev) {
+        prev->next = returned_block; // Insert in the middle or end
+    } else {
+        free_list = returned_block; // Update free list head
+    }
 }
 
 // Resize the allocated memory block
