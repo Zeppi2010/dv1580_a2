@@ -16,16 +16,21 @@ typedef struct Block {
 } Block;
 
 static Block *free_list = NULL; // Pointer to the start of the free list
+static int initialized = 0; // Initialization flag
 
 // Initialize the memory manager
 void mem_init(size_t size) {
+    if (initialized) {
+        fprintf(stderr, "Memory manager already initialized.\n");
+        return; // or handle error
+    }
     pool_size = size;
 
     // Allocate the memory pool using malloc
     memory_pool = (char *)malloc(pool_size);
     if (memory_pool == NULL) {
         fprintf(stderr, "Failed to allocate memory pool with malloc\n");
-        exit(EXIT_FAILURE);
+        return; // or handle error
     }
 
     // Set up the initial block
@@ -33,10 +38,16 @@ void mem_init(size_t size) {
     free_list->size = pool_size - sizeof(Block); // Set the size of the block
     free_list->next = NULL; // No next block
     free_list->free = 1; // Mark the block as free
+    initialized = 1; // Mark as initialized
 }
 
 // Allocate a block of memory
 void *mem_alloc(size_t size) {
+    if (!initialized) {
+        fprintf(stderr, "Memory manager not initialized.\n");
+        return NULL; // Handle error
+    }
+
     Block *current = free_list;
     Block *prev = NULL;
 
@@ -68,7 +79,7 @@ void *mem_alloc(size_t size) {
 
 // Free the allocated block of memory
 void mem_free(void *block) {
-    if (!block) return; // Ignore null pointers
+    if (!initialized || !block) return; // Ignore null pointers or if not initialized
 
     // Get the block header
     Block *returned_block = (Block *)((char *)block - sizeof(Block));
@@ -77,15 +88,10 @@ void mem_free(void *block) {
     // Coalesce adjacent free blocks
     Block *current = free_list;
     while (current) {
-        // Coalesce with previous block
+        // Coalesce with next block
         if (current->free && (char *)current + sizeof(Block) + current->size == (char *)returned_block) {
             current->size += returned_block->size + sizeof(Block);
             returned_block = current; // Update returned_block to the new coalesced block
-        }
-        // Coalesce with next block
-        if (returned_block->free && (char *)returned_block + sizeof(Block) + returned_block->size == (char *)current) {
-            returned_block->size += current->size + sizeof(Block);
-            returned_block->next = current->next; // Bypass the current block
         }
         current = current->next;
     }
@@ -93,6 +99,11 @@ void mem_free(void *block) {
 
 // Resize the allocated memory block
 void *mem_resize(void *block, size_t size) {
+    if (!initialized) {
+        fprintf(stderr, "Memory manager not initialized.\n");
+        return NULL; // Handle error
+    }
+
     if (!block) return mem_alloc(size);
     if (size == 0) {
         mem_free(block);
@@ -116,14 +127,21 @@ void *mem_resize(void *block, size_t size) {
 
 // Free the entire memory pool
 void mem_deinit() {
+    if (!initialized) return; // Ignore if not initialized
     free(memory_pool); // Free the memory pool using free
     memory_pool = NULL;
     pool_size = 0;
     free_list = NULL; // Clear the free list
+    initialized = 0; // Reset initialization flag
 }
 
 // Utility function to print the free list for debugging
 void print_free_list() {
+    if (!initialized) {
+        printf("Memory manager not initialized.\n");
+        return;
+    }
+
     Block *current = free_list;
     printf("Free list:\n");
     while (current) {
