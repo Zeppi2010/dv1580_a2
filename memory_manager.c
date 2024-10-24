@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <stdint.h>   // For uintptr_t
-#include <stdalign.h> // For alignof (C11 feature, fallback will be handled)
+#include <stdalign.h> // For alignof (C11 feature)
 #include <stddef.h>   // For size_t
 
 #define MIN_SIZE 32    // Minimum block size
@@ -19,11 +19,6 @@ BlockMeta blockMetaArray[1000];  // Array to hold block metadata (modify the siz
 size_t blockCount = 0;
 
 pthread_mutex_t memory_lock;  // Mutex for thread safety
-
-// Fallback for max_align_t if not available (C11)
-#ifndef max_align_t
-typedef struct { alignas(16) char c[16]; } max_align_t;
-#endif
 
 // Helper function to ensure proper alignment
 void* align_ptr(void* ptr, size_t alignment) {
