@@ -3,7 +3,7 @@
 #include <string.h>
 #include "memory_manager.h"
 
-#define MEMORY_POOL_SIZE 10240 // Example size of the memory pool (10 KB)
+#define MEMORY_POOL_SIZE 5000 // Example size of the memory pool (adjust as needed)
 
 static char *memory_pool = NULL; // Pointer to the memory pool
 static size_t pool_size = 0;      // Size of the memory pool
@@ -22,11 +22,11 @@ void mem_init(size_t size) {
         fprintf(stderr, "Failed to allocate memory pool\n");
         exit(EXIT_FAILURE);
     }
-    free_list = memory_pool; // Initially, the whole pool is free
 
-    // Set the initial block size
+    // Set up the initial block
+    free_list = memory_pool; // Initially, the whole pool is free
     Block *initial_block = (Block *)free_list;
-    initial_block->size = pool_size - sizeof(Block); // Set the size of the block
+    initial_block->size = pool_size - sizeof(Block); // Set size of the block
     initial_block->next = NULL; // No next block yet
 }
 
@@ -55,9 +55,9 @@ void *mem_alloc(size_t size) {
             if (prev) {
                 prev->next = current->next;
             } else {
-                free_list = current->next;
+                free_list = current->next; // Update free list head
             }
-            return (char *)current + sizeof(Block); // Return a pointer to the usable memory
+            return (char *)current + sizeof(Block); // Return pointer to usable memory
         }
         prev = current;
         current = current->next;
@@ -70,8 +70,10 @@ void mem_free(void *block) {
     if (!block) return;
 
     Block *returned_block = (Block *)((char *)block - sizeof(Block));
-    returned_block->next = (Block *)free_list; // Add the block to the free list
-    free_list = (char *)returned_block;         // Update the free list pointer
+    
+    // Insert returned block into the free list
+    returned_block->next = (Block *)free_list; 
+    free_list = (char *)returned_block; // Update the free list pointer
 }
 
 // Resize the allocated memory block
@@ -85,20 +87,22 @@ void *mem_resize(void *block, size_t size) {
     Block *old_block = (Block *)((char *)block - sizeof(Block));
     size_t old_size = old_block->size; // Get the size of the current block
 
-    if (size <= old_size) return block; // No need to resize
+    // If the requested size is less than or equal to the old size, return the same block
+    if (size <= old_size) return block;
 
+    // Allocate new block of requested size
     void *new_block = mem_alloc(size);
     if (new_block) {
-        memcpy(new_block, block, old_size);
-        mem_free(block);
+        memcpy(new_block, block, old_size); // Copy old data to new block
+        mem_free(block); // Free the old block
     }
-    return new_block;
+    return new_block; // Return pointer to the new block
 }
 
 // Free the entire memory pool
 void mem_deinit() {
-    free(memory_pool);
+    free(memory_pool); // Free the memory pool
     memory_pool = NULL;
     pool_size = 0;
-    free_list = NULL;
+    free_list = NULL; // Clear the free list
 }
