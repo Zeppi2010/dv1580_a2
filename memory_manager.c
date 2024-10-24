@@ -7,7 +7,7 @@
 
 static char *memory_pool = NULL; // Pointer to the memory pool
 static size_t pool_size = 0;      // Size of the memory pool
-static char *free_list;            // Pointer to the start of the free memory list
+static char *free_list = NULL;     // Pointer to the start of the free memory list
 
 typedef struct Block {
     size_t size;                    // Size of the block
@@ -26,8 +26,8 @@ void mem_init(size_t size) {
 
     // Set the initial block size
     Block *initial_block = (Block *)free_list;
-    initial_block->size = pool_size - sizeof(Block);
-    initial_block->next = NULL;
+    initial_block->size = pool_size - sizeof(Block); // Set the size of the block
+    initial_block->next = NULL; // No next block yet
 }
 
 // Allocate a block of memory
@@ -45,10 +45,10 @@ void *mem_alloc(size_t size) {
             // Split the block if there's enough space left
             if (current->size > aligned_size + sizeof(Block)) {
                 Block *new_block = (Block *)((char *)current + aligned_size);
-                new_block->size = current->size - aligned_size;
+                new_block->size = current->size - aligned_size - sizeof(Block);
                 new_block->next = current->next;
                 current->next = new_block;
-                current->size = aligned_size;
+                current->size = aligned_size - sizeof(Block);
             }
 
             // Remove the block from the free list
@@ -57,7 +57,7 @@ void *mem_alloc(size_t size) {
             } else {
                 free_list = current->next;
             }
-            return (char *)current + sizeof(Block);
+            return (char *)current + sizeof(Block); // Return a pointer to the usable memory
         }
         prev = current;
         current = current->next;
@@ -83,7 +83,8 @@ void *mem_resize(void *block, size_t size) {
     }
 
     Block *old_block = (Block *)((char *)block - sizeof(Block));
-    size_t old_size = old_block->size - sizeof(Block);
+    size_t old_size = old_block->size; // Get the size of the current block
+
     if (size <= old_size) return block; // No need to resize
 
     void *new_block = mem_alloc(size);
