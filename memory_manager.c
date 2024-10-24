@@ -76,6 +76,17 @@ void mem_free(void *block) {
 
     // Get the block header
     Block *returned_block = (Block *)((char *)block - sizeof(Block));
+    
+    // Check if the returned block is overlapping with the free list blocks
+    Block *current = free_list;
+    while (current) {
+        if ((char *)current >= (char *)returned_block && 
+            (char *)current < (char *)returned_block + returned_block->size + sizeof(Block)) {
+            fprintf(stderr, "Error: Overlapping blocks detected!\n");
+            return; // Overlap detected, do not free
+        }
+        current = current->next;
+    }
 
     // Insert returned block into the free list
     returned_block->next = free_list; 
