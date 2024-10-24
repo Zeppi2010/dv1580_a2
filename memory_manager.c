@@ -1,71 +1,101 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/mman.h>
 #include <string.h>
 #include "memory_manager.h"
 
-#define MEMORY_POOL_SIZE 5000 // Define the memory pool size
+typedef struct Block {
+    size_t size;
+    struct Block* next;
+} Block;
 
-static unsigned char *memory_pool = NULL; // Pointer to the allocated memory pool
-static size_t pool_size = 0; // Size of the memory pool
-static size_t next_free = 0; // Pointer to the next free location in the pool
+static Block* free_list = NULL; // Head of the free list
+static size_t total_memory = 0; // Total allocated memory
 
 void mem_init(size_t size) {
-    if (memory_pool != NULL) {
-        fprintf(stderr, "Memory pool is already initialized.\n");
+    if (free_list != NULL) {
+        fprintf(stderr, "Memory manager already initialized.\n");
         return;
     }
 
-    // Allocate memory using mmap
-    memory_pool = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (memory_pool == MAP_FAILED) {
-        perror("mmap failed");
+    total_memory = size;
+    free_list = (Block*)malloc(size);
+    if (free_list == NULL) {
+        perror("Failed to initialize memory manager");
         exit(EXIT_FAILURE);
     }
 
-    memset(memory_pool, 0, size); // Initialize memory to zero
-    pool_size = size;
-    next_free = 0; // Start allocation from the beginning
+    free_list->size = size - sizeof(Block); // Set the size of the initial block
+    free_list->next = NULL; // No other blocks in the free list
 }
 
 void mem_deinit(void) {
-    if (memory_pool == NULL) {
-        fprintf(stderr, "Memory pool is not initialized.\n");
+    if (free_list == NULL) {
+        fprintf(stderr, "Memory manager is not initialized.\n");
         return;
     }
 
-    munmap(memory_pool, pool_size);
-    memory_pool = NULL; // Reset the pointer
+    free(free_list); // Free the entire memory pool
+    free_list = NULL; // Reset the free list pointer
 }
 
 void* mem_alloc(size_t size) {
-    if (memory_pool == NULL) {
-        fprintf(stderr, "Memory pool is not initialized.\n");
+    if (free_list == NULL) {
+        fprintf(stderr, "Memory manager is not initialized.\n");
         return NULL;
     }
 
-    // Align size to a multiple of 8 for better memory alignment
-    size = (size + 7) & ~7;
+    size = (size + 7) & ~7; // Align size to a multiple of 8
 
-    // Check if there's enough space
-    if (next_free + size > pool_size) {
-        fprintf(stderr, "Memory allocation failed: not enough space.\n");
-        return NULL;
+    Block* current = free_list;
+    Block* previous = NULL;
+
+    // Traverse the free list to find a suitable block
+    while (current) {
+        if (current->size >= size) { // Found a block large enough
+            if (current->size > size + sizeof(Block)) { // Split block if too large
+                Block* new_block = (Block*)((char*)current + sizeof(Block) + size);
+                new_block->size = current->size - size - sizeof(Block);
+                new_block->next = current->next;
+                current->next = new_block;
+                current->size = size;
+            }
+            // Remove the current block from the free list
+            if (previous) {
+                previous->next = current->next;
+            } else {
+                free_list = current->next; // Update head of free list
+            }
+            return (void*)((char*)current + sizeof(Block)); // Return pointer to user space
+        }
+        previous = current;
+        current = current->next;
     }
 
-    // Allocate the memory
-    void* block = memory_pool + next_free;
-    next_free += size; // Move the pointer for the next allocation
-    return block;
+    fprintf(stderr, "Memory allocation failed: not enough space.\n");
+    return NULL; // No suitable block found
 }
 
 void mem_free(void* ptr) {
-    // In this simple implementation, we do not support free operation,
-    // since we are not keeping track of allocated blocks.
-    // You can extend this to manage a free list if needed.
+    if (ptr == NULL) return; // No action on NULL pointer
+
+    Block* block_to_free = (Block*)((char*)ptr - sizeof(Block)); // Get the block header
+    block_to_free->next = free_list; // Add the block to the front of the free list
+    free_list = block_to_free;
 }
 
 void* mem_resize(void* ptr, size_t new_size) {
-    // For simplicity, resizing is not implemented in this version.
-    return NULL;
+    if (ptr == NULL) return mem_alloc(new_size); // If ptr is NULL, just allocate new memory
+
+    Block* block_to_resize = (Block*)((char*)ptr - sizeof(Block)); // Get the block header
+    if (new_size <= block_to_resize->size) return ptr; // No need to resize
+
+    // Allocate a new block and copy the data
+    void* new_block = mem_alloc(new_size);
+    if (new_block == NULL) return NULL; // Allocation failed
+
+    // Copy old data to the new block
+    memcpy(new_block, ptr, block_to_resize->size);
+    mem_free(ptr); // Free the old block
+
+    return new_block; // Return the new block pointer
 }
