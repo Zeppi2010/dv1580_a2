@@ -1,3 +1,4 @@
+#include <sys/mman.h> // Required for mmap
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,9 +18,9 @@ typedef struct Block {
 // Initialize the memory manager
 void mem_init(size_t size) {
     pool_size = size;
-    memory_pool = (char *)malloc(pool_size);
-    if (!memory_pool) {
-        fprintf(stderr, "Failed to allocate memory pool\n");
+    memory_pool = mmap(NULL, pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (memory_pool == MAP_FAILED) {
+        fprintf(stderr, "Failed to allocate memory pool with mmap\n");
         exit(EXIT_FAILURE);
     }
 
@@ -101,7 +102,7 @@ void *mem_resize(void *block, size_t size) {
 
 // Free the entire memory pool
 void mem_deinit() {
-    free(memory_pool); // Free the memory pool
+    munmap(memory_pool, pool_size); // Use munmap to free the memory pool
     memory_pool = NULL;
     pool_size = 0;
     free_list = NULL; // Clear the free list
