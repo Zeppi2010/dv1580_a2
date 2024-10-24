@@ -5,10 +5,14 @@
 #include <stdio.h>
 #include <stddef.h>
 
+#include <pthread.h>
+
 typedef struct Node {
-    uint16_t data;
+    int data;
     struct Node* next;
+    pthread_mutex_t lock; // Add this line to include the mutex
 } Node;
+
 
 void list_init(Node** head, size_t size);
 void list_insert(Node** head, uint16_t data);
