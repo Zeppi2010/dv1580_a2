@@ -1,89 +1,63 @@
-#include <stdlib.h>
 #include <stdio.h>
-#include <unistd.h>
+#include <stdlib.h>
 #include <sys/mman.h>
+#include <string.h>
 #include "memory_manager.h"
 
-#define MEMORY_SIZE 5000 // Size for initial memory allocation
+#define MEMORY_POOL_SIZE 5000 // Define the memory pool size
 
-typedef struct MemoryBlock {
-    size_t size;               // Size of the allocated memory block
-    struct MemoryBlock *next;  // Pointer to the next memory block in the list
-    void *ptr;                // Pointer to the allocated memory
-} MemoryBlock;
+static unsigned char *memory_pool = NULL; // Pointer to the allocated memory pool
 
-MemoryBlock *head = NULL; // Head of the linked list of memory blocks
-
-// Initialize memory manager
-void mem_init() {
-    head = NULL; // Reset the linked list
-}
-
-// Deinitialize memory manager
-void mem_deinit() {
-    MemoryBlock *current = head;
-    while (current != NULL) {
-        MemoryBlock *next = current->next;
-        munmap(current->ptr, current->size); // Free each allocated memory block
-        // The following line is optional; it's good practice to ensure
-        // you're not holding onto a pointer to freed memory
-        free(current);
-        current = next; // Move to the next block
-    }
-    head = NULL; // Clear the list
-}
-
-// Custom memory allocation function
-void *mem_alloc(size_t size) {
-    if (size <= 0) return NULL; // Invalid size
-
-    // Allocate space for the memory block structure
-    MemoryBlock *block = (MemoryBlock *)malloc(sizeof(MemoryBlock));
-    if (block == NULL) return NULL; // Allocation failed
-
-    // Allocate the requested memory using mmap
-    block->ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (block->ptr == MAP_FAILED) {
-        free(block); // Free the block structure if mmap fails
-        return NULL; // mmap failed
+void mem_init(size_t size) {
+    if (memory_pool != NULL) {
+        fprintf(stderr, "Memory pool is already initialized.\n");
+        return;
     }
 
-    block->size = size;         // Set the size of the block
-    block->next = head;         // Link to the previous head
-    head = block;               // Update head to the new block
+    // Allocate memory using mmap
+    memory_pool = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (memory_pool == MAP_FAILED) {
+        perror("mmap failed");
+        exit(EXIT_FAILURE);
+    }
 
-    return block->ptr;          // Return pointer to allocated memory
+    memset(memory_pool, 0, size); // Initialize memory to zero
 }
 
-// Custom memory free function
-void mem_free(void *ptr) {
-    if (ptr == NULL) return; // Nothing to free
-
-    MemoryBlock *current = head;
-    MemoryBlock *prev = NULL;
-
-    // Traverse the list to find the block to free
-    while (current != NULL) {
-        if (current->ptr == ptr) {
-            if (prev) {
-                prev->next = current->next; // Link the previous block to the next
-            } else {
-                head = current->next; // Update head if freeing the first block
-            }
-            munmap(current->ptr, current->size); // Free the allocated memory
-            free(current); // Free the memory block structure
-            return;
-        }
-        prev = current; // Move to the next block
-        current = current->next;
+void mem_deinit(void) {
+    if (memory_pool == NULL) {
+        fprintf(stderr, "Memory pool is not initialized.\n");
+        return;
     }
+
+    munmap(memory_pool, MEMORY_POOL_SIZE);
+    memory_pool = NULL; // Reset the pointer
 }
 
-// Optional: Print currently allocated memory blocks for debugging
-void print_allocations() {
-    MemoryBlock *current = head;
-    while (current != NULL) {
-        printf("Allocated block of size %zu at %p\n", current->size, current->ptr);
-        current = current->next;
+void* mem_alloc(size_t size) {
+    if (memory_pool == NULL) {
+        fprintf(stderr, "Memory pool is not initialized.\n");
+        return NULL;
     }
+
+    // TODO: Implement allocation logic here, returning a pointer to the allocated memory
+
+    return NULL; // Replace this with the actual pointer to allocated memory
+}
+
+void mem_free(void* ptr) {
+    if (memory_pool == NULL || ptr == NULL) {
+        return; // No action needed
+    }
+
+    // TODO: Implement deallocation logic here
+}
+
+void* mem_resize(void* ptr, size_t new_size) {
+    if (memory_pool == NULL || ptr == NULL) {
+        return NULL; // No resizing needed
+    }
+
+    // TODO: Implement resizing logic here
+    return NULL; // Replace this with the actual pointer to resized memory
 }
