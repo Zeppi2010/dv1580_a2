@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 #include "memory_manager.h"
 
 #define MIN_SIZE sizeof(size_t) // Minimum size for allocation
@@ -27,9 +28,10 @@ void *align_ptr(void *ptr, size_t alignment) {
 
 // Function to initialize the memory manager
 void mem_init(size_t size) {
-    memoryPool = (char *)malloc(size);
-    if (!memoryPool) {
-        fprintf(stderr, "Error: Unable to allocate memory pool.\n");
+    // Allocate memory pool using mmap
+    memoryPool = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (memoryPool == MAP_FAILED) {
+        fprintf(stderr, "Error: Unable to allocate memory pool using mmap.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -38,14 +40,14 @@ void mem_init(size_t size) {
     blockMetaArray = (BlockMeta *)malloc(blockCount * sizeof(BlockMeta));
     if (!blockMetaArray) {
         fprintf(stderr, "Error: Unable to allocate metadata array.\n");
-        free(memoryPool);
+        munmap(memoryPool, size);
         exit(EXIT_FAILURE);
     }
 
     // Initialize the blocks
     for (size_t i = 0; i < blockCount; ++i) {
-        blockMetaArray[i].size = MIN_SIZE; // Each block has a minimum size
-        blockMetaArray[i].isFree = 1;      // All blocks are initially free
+        blockMetaArray[i].size = (size / blockCount); // Each block has an equal size
+        blockMetaArray[i].isFree = 1;                // All blocks are initially free
     }
 
     // Align the memory pool
@@ -117,7 +119,7 @@ void *mem_resize(void *block, size_t size) {
 
 // Function to clean up the memory manager
 void mem_deinit() {
-    free(memoryPool);
+    munmap(memoryPool, MEMORY_POOL_SIZE); // Free mmaped memory
     free(blockMetaArray);
     pthread_mutex_destroy(&memory_lock);
 }
