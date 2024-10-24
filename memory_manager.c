@@ -86,23 +86,17 @@ void mem_free(void *block) {
     // Coalesce adjacent free blocks
     Block *current = free_list;
 
-    // Start by checking if we can coalesce with the previous or next blocks
+    // Check coalescing with previous block
     while (current) {
         // Coalesce with the next block
         if (current->free && (char *)current + sizeof(Block) + current->size == (char *)returned_block) {
             current->size += returned_block->size + sizeof(Block);
             returned_block = current; // Update to the coalesced block
             returned_block->next = current->next; // Bypass the current block
-        } else {
-            // Move to the next block
-            current = current->next;
         }
 
-        // Check if the next block can be coalesced
-        if (returned_block->next && returned_block->next->free) {
-            returned_block->size += returned_block->next->size + sizeof(Block);
-            returned_block->next = returned_block->next->next; // Bypass the next block
-        }
+        // Move to the next block
+        current = current->next;
     }
 }
 
