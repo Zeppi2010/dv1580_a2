@@ -4,8 +4,8 @@
 #include "memory_manager.h"
 
 typedef struct Block {
-    size_t size;
-    struct Block* next;
+    size_t size;         // Size of the block
+    struct Block* next;  // Pointer to the next block in the free list
 } Block;
 
 static Block* free_list = NULL; // Head of the free list
@@ -18,6 +18,7 @@ void mem_init(size_t size) {
     }
 
     total_memory = size;
+    // Allocate memory for the pool and the initial block
     free_list = (Block*)malloc(size);
     if (free_list == NULL) {
         perror("Failed to initialize memory manager");
@@ -44,7 +45,8 @@ void* mem_alloc(size_t size) {
         return NULL;
     }
 
-    size = (size + 7) & ~7; // Align size to a multiple of 8
+    // Align size to a multiple of 8 bytes
+    size = (size + sizeof(Block) + 7) & ~7;
 
     Block* current = free_list;
     Block* previous = NULL;
