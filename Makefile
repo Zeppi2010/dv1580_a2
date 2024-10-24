@@ -1,18 +1,24 @@
 # Compiler and Linking Variables
 CC = gcc
-CFLAGS = -Wall -fPIC
+CFLAGS = -Wall -fPIC -g -pthread -lm
 LIB_NAME = libmemory_manager.so
+LDFLAGS = -lm -g
 
 # Source and Object Files
-SRC = memory_manager.c linked_list.c
+SRC = memory_manager.c
 OBJ = $(SRC:.c=.o)
 
 # Default target
-all: mmanager linked_list.o test_mmanager test_list
+all: mmanager list test_mmanager test_list
+
+ifeq ($(USE_TSAN), 1)
+    CFLAGS += -fsanitize=thread
+    LDFLAGS += -fsanitize=thread
+endif
 
 # Rule to create the dynamic library
-$(LIB_NAME): memory_manager.o
-	$(CC) -shared -o $@ $^
+$(LIB_NAME): $(OBJ)
+	$(CC) $(CFLAGS) -shared -o $@ $(OBJ) $(LDFLAGS)
 
 # Rule to compile source files into object files
 %.o: %.c
@@ -21,28 +27,29 @@ $(LIB_NAME): memory_manager.o
 # Build the memory manager
 mmanager: $(LIB_NAME)
 
-# Build the linked list object
-linked_list.o: linked_list.c linked_list.h
-	$(CC) $(CFLAGS) -c linked_list.c -o linked_list.o
+# Build the linked list
+list: linked_list.o
 
 # Test target to run the memory manager test program
+#$(LIB_NAME)
 test_mmanager: $(LIB_NAME)
-	$(CC) -o test_memory_manager test_memory_manager.c -L. -lmemory_manager -lm -lpthread
+	$(CC) $(CFLAGS) -o test_memory_manager test_memory_manager.c -L. -lmemory_manager $(LDFLAGS)
 
 # Test target to run the linked list test program
+#$(LIB_NAME) linked_list.o
+#linked_list.c
 test_list: $(LIB_NAME) linked_list.o
-	$(CC) -o test_linked_list linked_list.o test_linked_list.c -L. -lmemory_manager -lm -lpthread
-
-# Run tests
+	$(CC) $(CFLAGS) -o test_linked_list linked_list.c test_linked_list.c -L. -lmemory_manager $(LDFLAGS)
+#run tests
 run_tests: run_test_mmanager run_test_list
 
-# Run test cases for the memory manager
+# run test cases for the memory manager
 run_test_mmanager:
-	./test_memory_manager
+	export LD_LIBRARY_PATH=. && ./test_memory_manager 2
 
-# Run test cases for the linked list
+# run test cases for the linked list
 run_test_list:
-	./test_linked_list
+	export LD_LIBRARY_PATH=. && ./test_linked_list 0
 
 # Clean target to clean up build files
 clean:
