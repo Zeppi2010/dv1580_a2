@@ -1,26 +1,48 @@
-# Makefile
-
+#Compiler and Linking Variables
 CC = gcc
-CFLAGS = -Wall -Wextra -fPIC -pthread
-LIBS = -L. -lmemory_manager -lpthread
+CFLAGS = -Wall -fPIC
+LIB_NAME = libmemory_manager.so
 
-# Targets
-.PHONY: all clean mmanager list test
+#Source and Object Files
+SRC = memory_manager.c
+OBJ = $(SRC:.c=.o)
 
-all: mmanager list
+#Default target
+all: mmanager list test_mmanager test_list
 
-mmanager: memory_manager.o
-	$(CC) -shared -o memory_manager.dll memory_manager.o -Wl,--out-implib=libmemory_manager.a
+#Rule to create the dynamic library
+$(LIB_NAME): $(OBJ)
+	$(CC) -shared -o $@ $(OBJ)
 
-list: linked_list.o
-	@echo "Linked list compiled, but not generating an executable."
-
-test: test_linked_list.o
-	$(CC) -o test_linked_list test_linked_list.o $(LIBS)
-
-# Compilation
+#Rule to compile source files into object files
 %.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -c $< -o $@
 
+#Build the memory manager
+mmanager: $(LIB_NAME)
+
+#Build the linked list
+list: linked_list.o
+
+#Test target to run the memory manager test program
+test_mmanager: $(LIB_NAME)
+	$(CC) -o test_memory_manager test_memory_manager.c -L. -lmemory_manager -lm
+
+#Test target to run the linked list test program
+test_list: $(LIB_NAME) linked_list.o
+	$(CC) -o test_linked_list linked_list.c test_linked_list.c -L. -lmemory_manager -lm
+
+#run tests
+run_tests: run_test_mmanager run_test_list
+
+#run test cases for the memory manager
+run_test_mmanager:
+	./test_memory_manager
+
+#run test cases for the linked list
+run_test_list:
+	./test_linked_list
+
+#Clean target to clean up build files
 clean:
-	rm -f memory_manager.o linked_list.o memory_manager.dll libmemory_manager.a test_linked_list.o test_linked_list
+	rm -f $(OBJ) $(LIB_NAME) test_memory_manager test_linked_list linked_list.o
