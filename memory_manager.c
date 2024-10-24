@@ -2,16 +2,16 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdint.h>
-#include <stddef.h>
+#include <string.h>
 #include "memory_manager.h"
 
-#define MIN_SIZE sizeof(size_t)         // Minimum size for allocation
-#define MEMORY_POOL_SIZE 1024 * 1024    // Size of the memory pool (1MB)
+#define MIN_SIZE sizeof(size_t) // Minimum size for allocation
+#define MEMORY_POOL_SIZE 1024 * 1024 // Size of the memory pool (1MB)
 
 // Block metadata structure
 typedef struct BlockMeta {
-    size_t size;        // Size of the block
-    int isFree;        // Is the block free?
+    size_t size; // Size of the block
+    int isFree; // Is the block free?
 } BlockMeta;
 
 static char* memoryPool;           // Pointer to the memory pool
@@ -28,7 +28,7 @@ void* align_ptr(void* ptr, size_t alignment) {
 
 // Function to initialize the memory manager
 void mem_init(size_t size) {
-    memoryPool = (char*)malloc(size); // Use the provided size
+    memoryPool = (char*)malloc(size);
     if (!memoryPool) {
         fprintf(stderr, "Error: Unable to allocate memory pool.\n");
         exit(EXIT_FAILURE);
@@ -36,7 +36,6 @@ void mem_init(size_t size) {
 
     blockCount = size / MIN_SIZE;
     blockMetaArray = (BlockMeta*)malloc(blockCount * sizeof(BlockMeta));
-
     if (!blockMetaArray) {
         fprintf(stderr, "Error: Unable to allocate metadata array.\n");
         free(memoryPool);
@@ -62,25 +61,31 @@ void* mem_alloc(size_t size) {
 
     // Ensure size is at least minimum size
     size = (size < MIN_SIZE) ? MIN_SIZE : size;
+
+    // Find a suitable block
     for (size_t i = 0; i < blockCount; ++i) {
         if (blockMetaArray[i].isFree && blockMetaArray[i].size >= size) {
-            // Check if there's enough space to split the block
+            // Check if we can split the block
             size_t remainingSize = blockMetaArray[i].size - size;
+
+            // If the remaining size is enough for a new block
             if (remainingSize >= MIN_SIZE + sizeof(BlockMeta)) {
-                blockMetaArray[i].size = size;
-                blockMetaArray[i].isFree = 0;
+                // Allocate the requested block
+                blockMetaArray[i].isFree = 0; // Mark as used
+                blockMetaArray[i].size = size; // Set new size
 
                 // Create a new free block
-                blockMetaArray[blockCount].size = remainingSize;
-                blockMetaArray[blockCount].isFree = 1;
-                blockCount++;
+                blockMetaArray[blockCount].size = remainingSize; // Size of the remaining block
+                blockMetaArray[blockCount].isFree = 1; // Mark new block as free
+                blockCount++; // Increase the block count
 
                 pthread_mutex_unlock(&memory_lock); // Unlock
-                return (char*)memoryPool + (i * MIN_SIZE);
+                return (char*)memoryPool + (i * MIN_SIZE); // Return the pointer to the allocated block
             } else {
-                blockMetaArray[i].isFree = 0; // Allocate the whole block
+                // Allocate the whole block
+                blockMetaArray[i].isFree = 0; // Mark as used
                 pthread_mutex_unlock(&memory_lock); // Unlock
-                return (char*)memoryPool + (i * MIN_SIZE);
+                return (char*)memoryPool + (i * MIN_SIZE); // Return the pointer
             }
         }
     }
